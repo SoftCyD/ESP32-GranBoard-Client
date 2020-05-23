@@ -48,7 +48,7 @@ class MyClientCallback : public BLEClientCallbacks
 
   void onDisconnect(BLEClient *pclient)
   {
-    Serial.print("<KO>");
+    Serial.println("<KO>");
     resetFunc(); //call reset
   }
 };
