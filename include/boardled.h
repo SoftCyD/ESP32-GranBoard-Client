@@ -7,7 +7,7 @@
 
 #include <Arduino.h>
 #include "BLERemoteCharacteristic.h"
-#include "rgb.h"
+#include <rgb.h>
 
 class BoardLed
 {

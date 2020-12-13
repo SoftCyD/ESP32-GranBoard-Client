@@ -1,11 +1,13 @@
-
 /*
  * ESP32 GranBoard Client 
  * 
  * - 15/05/2020 - Soft.Cyd@gmail.com - First version
- * 
+ * - 13/12/2020 - Soft.Cyd@gmail.com - Update with scan and without address
  * 
  */
+
+// Some links
+// https://esp32.com/viewtopic.php?t=4181
 
 #include <Arduino.h>
 #include "BLEDevice.h"
@@ -15,21 +17,17 @@
  //declare reset function at address 0
 void (*resetFunc)(void) = 0;
 
-// only change Granboard MAC Address here
-BLEAddress GranBoardAddress("D8:89:25:31:96:45");
-
 // remote service
 static BLEUUID serviceUUID("442f1570-8a00-9a28-cbe1-e1d4212d53eb");
 // characteristic of remote service
 static BLEUUID readUUID("442f1571-8a00-9a28-cbe1-e1d4212d53eb");
 static BLEUUID writeUUID("442f1572-8a00-9a28-cbe1-e1d4212d53eb");
-static BLERemoteCharacteristic *pRemoteCharacteristic;
+static BLERemoteCharacteristic *pReadCharacteristic;
 static BLERemoteCharacteristic *pWriteCharacteristic;
 
-BLEClient *pClient;
-
-static boolean connected = false;
+static BLEAddress *pGranBoardAddress;
 static boolean doConnect = false;
+static boolean connected = false;
 
 String ledTarget = "";
 bool ledOut = false;
@@ -37,7 +35,6 @@ bool ledBull = false;
 bool ledButton = false;
 
 BoardLed *granboard;
-
 
 class MyClientCallback : public BLEClientCallbacks
 {
@@ -48,8 +45,10 @@ class MyClientCallback : public BLEClientCallbacks
 
   void onDisconnect(BLEClient *pclient)
   {
+    connected = false;
     Serial.println("<KO>");
     resetFunc(); //call reset
+    return;
   }
 };
 
@@ -97,12 +96,11 @@ static void notifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic, ui
   }
 }
 
-bool connectToServer()
+bool connectToServer(BLEAddress pAddress)
 {
+    BLEClient*  pClient  = BLEDevice::createClient();
+    pClient->connect(pAddress, BLE_ADDR_TYPE_RANDOM);
   pClient->setClientCallbacks(new MyClientCallback());
-
-  if (pClient->connect(GranBoardAddress, BLE_ADDR_TYPE_RANDOM) == false)
-    return false;
 
   BLERemoteService *pRemoteService = pClient->getService(serviceUUID);
   if (pRemoteService == nullptr)
@@ -111,15 +109,15 @@ bool connectToServer()
     return false;
   }
 
-  pRemoteCharacteristic = pRemoteService->getCharacteristic(readUUID);
-  if (pRemoteCharacteristic == nullptr)
+  pReadCharacteristic = pRemoteService->getCharacteristic(readUUID);
+  if (pReadCharacteristic == nullptr)
   {
     pClient->disconnect();
     return false;
   }
 
-  if (pRemoteCharacteristic->canNotify())
-    pRemoteCharacteristic->registerForNotify(notifyCallback);
+  if (pReadCharacteristic->canNotify())
+    pReadCharacteristic->registerForNotify(notifyCallback);
 
   pWriteCharacteristic = pRemoteService->getCharacteristic(writeUUID);
   if (pWriteCharacteristic == nullptr)
@@ -134,32 +132,44 @@ bool connectToServer()
   return true;
 }
 
-void setup()
-{
-  BLEDevice::init("GranBoard Client");
-  pClient = BLEDevice::createClient();
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+
+    if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().equals(serviceUUID)) {
+      advertisedDevice.getScan()->stop();
+      pGranBoardAddress = new BLEAddress(advertisedDevice.getAddress());
+      doConnect = true;
+    }    
+  }
+};
+
+
+void setup() {
   Serial.begin(115200);
+  BLEDevice::init("");
 
-  doConnect = true;
-}
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->start(30);
+} 
 
-void loop()
-{
-  if (doConnect == true)
-  {
-    if (connectToServer() == true)
-    {
-      Serial.println("<OK>");
+
+void loop() {
+  if (doConnect == true) {
+    if (connectToServer(*pGranBoardAddress)) {
       granboard->lightRing(RGB::AQUA);
       delay(2000);
       granboard->clear();
+      connected = true;
+    } else {
+      resetFunc();
     }
     doConnect = false;
   }
 
-  if (connected)
-  {
+  if (connected) {
     // all actions when conected
     if (ledTarget != "")
     {
@@ -180,8 +190,7 @@ void loop()
       granboard->pressButton(RGB::MAROON, RGB::GREEN);
       ledButton = false;
     }
-
+  
   }
-
-  delay(50);
-}
+  delay(5);
+} 
